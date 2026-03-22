@@ -1,9 +1,11 @@
 import os
+from tqdm import tqdm
 import torch
 import torch.nn as nn
 import torch.optim as optim
 from torchvision import models, transforms
 from datasets import load_dataset
+import torch_xla
 import torch_xla.core.xla_model as xm
 import torch_xla.distributed.parallel_loader as pl
 import torch_xla.distributed.xla_multiprocessing as xmp
@@ -11,7 +13,8 @@ import torch_xla.distributed.xla_multiprocessing as xmp
 # ==== CONFIG ====
 SAVE_PATH = "/app/saved_weights/"
 os.makedirs(SAVE_PATH, exist_ok=True)
-BATCH_SIZE = 32
+BATCH_SIZE = 1024
+EPOCHES = 5
 LR = 1e-4
 NUM_WORKERS = 0  # As requested
 
@@ -27,10 +30,10 @@ class NWPUDataset(torch.utils.data.Dataset):
         self.transform = transform
 
     def __len__(self):
-        return len(self.dataset)
+        return len(self.dataset) * EPOCHES
 
     def __getitem__(self, index):
-        item = self.dataset[index]
+        item = self.dataset[index % len(self.dataset)]
         image = item["image"].convert("RGB")
         label_str = get_label_from_filename(item["raw_filename"])
         label = self.label2idx[label_str]
@@ -62,8 +65,8 @@ def train_fn(index):
     
     sampler = torch.utils.data.distributed.DistributedSampler(
         train_ds,
-        num_replicas=xm.xrt_world_size(),
-        rank=xm.get_ordinal(),
+        num_replicas=torch_xla.runtime.world_size(),
+        rank=torch_xla.runtime.global_ordinal(),
         shuffle=True
     )
 
@@ -93,7 +96,7 @@ def train_fn(index):
     model.train()
     xm.master_print(f"Starting training with {num_classes} classes...")
 
-    for batch_idx, (data, target) in enumerate(mp_loader):
+    for batch_idx, (data, target) in enumerate(tqdm(mp_loader) if xm.is_master_ordinal() else mp_loader):
         optimizer.zero_grad()
         
         output = model(data)
@@ -103,12 +106,13 @@ def train_fn(index):
         # Gradient reduction and weight update
         xm.optimizer_step(optimizer)
 
-        if batch_idx % 10 == 0:
+        if batch_idx % (len(train_ds) // BATCH_SIZE) == 0:
             xm.master_print(f"Batch {batch_idx} | Loss {loss.item():.4f}")
 
     # 5. Save Weights
     # Only save from the master process to avoid file corruption
     xm.save(model.state_dict(), os.path.join(SAVE_PATH, "resnet_nwpu.pth"))
+    xm.master_print(f"Trained {batch_idx + 1} steps.")
     xm.master_print(f"Training finished. Weights saved to {SAVE_PATH}")
 
 if __name__ == "__main__":
