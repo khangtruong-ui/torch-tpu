@@ -1,0 +1,6 @@
+FROM us-central1-docker.pkg.dev/tpu-pytorch-releases/docker/xla:r2.6.0_3.10_tpuvm_cxx11
+
+RUN pip install -q datasets transformers==4.57.3 Pillow matplotlib einops nltk torch torch_xla[tpu] torchvision tpu-info -f https://storage.googleapis.com/jax-releases/libtpu_releases.html
+
+ENV PJRT_DEVICE=TPU
+
