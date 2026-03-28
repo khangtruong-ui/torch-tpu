@@ -16,7 +16,7 @@ os.makedirs(SAVE_PATH, exist_ok=True)
 BATCH_SIZE = 1024
 EPOCHES = 5
 LR = 1e-4
-NUM_WORKERS = 0  # As requested
+NUM_WORKERS = 32  # As requested
 
 # ==== UTILS ====
 def get_label_from_filename(filename):
