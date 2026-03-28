@@ -1,0 +1,1 @@
+docker run --rm --privileged --shm-size=128gb test:latest
